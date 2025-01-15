@@ -1,0 +1,140 @@
+---
+title: "seminar 12b"
+output: html_document
+date: "2025-01-15"
+---
+
+# Importul si incarcarea datelor in memoria de lucru. Pregtirea setulu de date pentru analiză
+
+
+```{r}
+library(readxl)
+
+example_dataset <-  read_excel("example_dataset.xlsx")
+df_re <- as.data.frame(example_dataset)
+rm(example_dataset)
+df_re <- df_re[, -1]
+df_re[,c(2:5)] <- lapply(df_re[,c(2:5)], factor) # transformam coloanele 2-5 in factori
+
+rownames(df_re) <- df_re$Name # stabilim coloana cu numele imparatilor drept nume de rand
+
+df_re$Succession_bivariate <- as.factor(                               #cerem crearea noii coloane ca factor
+  ifelse(                                                              #functie prin care putem sa creem grupuri conditionate
+    df_re$Succession=="Birthright",                                    #specificam setul de date si coloana pe care le dorim grupate
+    #si conditia pe care o dorim indeplinita
+    "Ereditar",                                                        # specificam valoarea pe care o dorim in cazul indeplinirii     conditiei
+    "Altul"))                                                       # specificam valoarea pe care o dorim in cazul in care conditia nu este indeplinita
+
+df_restore <- df_re
+
+```
+
+#Analiza Exploratorie
+
+```{r}
+
+library(ggplot2)
+library(GGally)
+
+ggpairs(df_re, columns = 6:8) +
+  ggtitle("Grafic 1. Analiza Exploratorie")
+  
+  
+library(dbscan)
+lof_scores <- dbscan::lof(scale(df_re[,6:8], center = T, scale = T), minPts = 4)
+
+summary(lof_scores)
+
+df_re$lof_scores <- lof_scores
+
+ggplot(df_re, aes(x = 1:nrow(df_re), y = lof_scores)) +
+  geom_point() + 
+  geom_text(aes(label = Name)) +
+  theme_light() +
+  xlab(label = "") +
+  ylab(label = "Scorul Densității Locale") +
+  ggtitle("Grafic 2. Identificarea valorilor extreme")
+
+
+library(dplyr)
+  
+limita <- 2.5
+df_re$extrem <- ifelse(lof_scores > limita, "Extrem", "Normal")
+
+df_curat <- filter(df_re, !df_re$extrem == "Extrem")
+
+ggpairs(df_curat, columns = 6:8) +
+  ggtitle("Grafic 3. Analiza Exploratorie după eliminarea valorilor extreme")
+
+```
+
+# Analiza de clusterizare
+
+
+```{r}
+
+df_centr_clust <- as.data.frame(scale(df_re[,6:8],
+                                               center = TRUE,
+                                               scale = TRUE)
+                                         )
+
+library(hopkins)
+library(factoextra)
+library(FactoMineR)
+
+hopkins::hopkins(df_centr_clust, m = nrow(df_centr_clust) - 2)
+
+fviz_dist(dist(df_centr_clust), show_labels = T) +
+  labs(title = "Grafic 4. Tendințe de grupare",
+       subtitle = "Indice Hopkins: 0.949") 
+
+clust_attr <- eclust(df_centr_clust,                       
+                                      FUNcluster = "agnes",             
+                                      hc_metric = "minkowski",         
+                                      hc_method = "ward.D2")           
+
+clusts_indet <- fviz_dend(clust_attr) +
+  ggtitle("Grafic 5. Dendrograma clusterelor")
+clusts_indet
+
+library(clValid)
+library(psych)
+internal_validation <- clValid(df_centr_clust, 2:3, 
+                               clMethods = c("agnes"),
+                               validation = c("internal", "stability"))
+summary(internal_validation)
+
+clust_attr <- eclust(df_centr_clust,                 
+                                      FUNcluster = "agnes", 
+                                      k = 3,
+                                      hc_metric = "minkowski",         
+                                      hc_method = "ward.D2") 
+
+clusts_3 <- fviz_dend(clust_attr, rect = T, rect_fill = T) +
+  ggtitle("Grafic 5. Dendrograma clusterelor")
+clusts_3
+```
+
+#Interpretarea clusterelor
+
+
+```{r}
+df_re$grupuri <- as.factor(clust_attr$cluster)
+
+pca_re <- PCA(df_re[,6:8], graph = FALSE, scale.unit = T)
+
+plot_pca <- fviz_pca_biplot(pca_re,
+                                     col.ind = df_re$grupuri,
+                                     geom.ind = "point",
+                                     col.var = "black",                       
+                                     repel = TRUE,                            
+                                     title = "Grafic 8. Biplot CP 1 & CP 2 cu indicarea clusterelor",
+                                     legend.title = "Clustere") + 
+  geom_text(label = df_re$Name, hjust = 0.5, nudge_y = -0.09, check_overlap = TRUE) +
+   scale_colour_viridis_d()
+
+plot_pca
+
+
+```
+
